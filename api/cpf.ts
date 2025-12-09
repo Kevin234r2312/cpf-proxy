@@ -1,42 +1,46 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+// /api/cpf.ts
+export default async function handler(req: any, res: any) {
+  // CORS básico
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  if (req.method === "OPTIONS") return res.status(204).end();
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const BASE = process.env.CPFHUB_BASE_URL;
+    const TOKEN = process.env.CPFHUB_TOKEN;
+
     const cpf = String(req.query.cpf || "").replace(/\D+/g, "");
-    if (cpf.length !== 11) {
+    if (!cpf || cpf.length !== 11) {
       return res.status(400).json({ success: false, error: "CPF inválido" });
     }
-
-    const base = process.env.CPFHUB_BASE_URL;
-    const token = process.env.CPFHUB_TOKEN;
-    if (!base || !token) {
-      return res.status(500).json({ success: false, error: "Variáveis de ambiente ausentes" });
-    }
-
-    const url = `${base}/consulta?cpf=${cpf}`; // ajuste ao endpoint do seu provedor
-    const r = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    });
-
-    const raw = await r.text();
-    let data: any = {};
-    try { data = JSON.parse(raw); } catch {}
-
-    if (!r.ok) {
-      return res.status(r.status).json({
+    if (!BASE || !TOKEN) {
+      return res.status(500).json({
         success: false,
-        error: data?.message || raw || "Erro no provedor",
+        error: "ENV ausentes: CPFHUB_BASE_URL/CPFHUB_TOKEN",
       });
     }
 
-    // normalize
-    const name = data?.data?.name ?? data?.nome ?? "";
-    const birthDate =
-      data?.data?.birthDate ?? data?.data_nascimento ?? data?.nascimento ?? "";
+    const upstream = await fetch(`${BASE}/cpf/${cpf}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+    });
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.status(200).json({ success: true, data: { name, birthDate } });
+    const text = await upstream.text();
+    let data: any = text;
+    try { data = JSON.parse(text); } catch {}
+
+    if (!upstream.ok) {
+      return res
+        .status(upstream.status)
+        .json({ success: false, error: data?.error || text });
+    }
+
+    return res.status(200).json({ success: true, data });
   } catch (e: any) {
-    return res.status(500).json({ success: false, error: e?.message || "Falha inesperada" });
+    return res.status(500).json({ success: false, error: e?.message || "Erro inesperado" });
   }
 }
