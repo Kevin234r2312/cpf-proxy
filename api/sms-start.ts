@@ -1,51 +1,58 @@
 // api/sms-start.ts
-export default async function handler(req: any, res: any) {
+import type { VercelRequest, VercelResponse } from '@vercel/node'
+import twilio from 'twilio'
+
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID as string,
+  process.env.TWILIO_AUTH_TOKEN as string
+)
+
+const verifyServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID as string
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method not allowed' })
+  }
+
   try {
-    const phone = (req.query.phone as string) || ""
+    const { phone } = req.query
 
-    if (!phone) {
-      return res.status(400).json({ success: false, error: "phone obrigatório" })
+    if (!phone || typeof phone !== 'string') {
+      return res.status(400).json({ success: false, error: 'phone é obrigatório' })
     }
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID
-    const authToken = process.env.TWILIO_AUTH_TOKEN
-    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID
+    // 🔧 LIMPAR O NÚMERO
+    // tira espaços, parênteses, traços etc
+    let to = phone.replace(/[^\d+]/g, '')
 
-    if (!accountSid || !authToken || !serviceSid) {
-      return res.status(500).json({ success: false, error: "ENV Twilio faltando" })
+    // se não começar com +, coloca (ex.: 5561... -> +5561...)
+    if (!to.startsWith('+')) {
+      to = `+${to}`
     }
 
-    const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64")
+    const verification = await client.verify.v2
+      .services(verifyServiceSid)
+      .verifications.create({
+        to,
+        channel: 'sms',
+      })
 
-    const body = new URLSearchParams()
-    body.append("To", phone)           // ex: +5511999999999
-    body.append("Channel", "sms")
-
-    const twilioRes = await fetch(
-      `https://verify.twilio.com/v2/Services/${serviceSid}/Verifications`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${auth}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      }
-    )
-
-    const data = await twilioRes.json()
-
-    if (!twilioRes.ok) {
-      return res
-        .status(twilioRes.status)
-        .json({ success: false, error: data })
-    }
-
-    return res.status(200).json({ success: true, data })
+    return res.status(200).json({
+      success: true,
+      to,
+      status: verification.status,
+      sid: verification.sid,
+    })
   } catch (err: any) {
-    console.error(err)
-    return res
-      .status(500)
-      .json({ success: false, error: err?.message || "Erro interno" })
+    console.error('Twilio error:', err)
+
+    return res.status(200).json({
+      success: false,
+      error: {
+        message: err.message || 'Erro ao enviar SMS',
+        code: err.code,
+        status: err.status,
+      },
+    })
   }
 }
