@@ -13,6 +13,17 @@ if (!accountSid || !authToken || !verifySid) {
 const client = accountSid && authToken ? twilio(accountSid, authToken) : null;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 🔹 CORS – ISSO É O QUE TAVA FALTANDO
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    // Pré-flight do navegador
+    res.status(200).end();
+    return;
+  }
+
   try {
     if (!client || !verifySid) {
       return res
@@ -21,18 +32,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const step = String(req.query.step || "");
-    const phone = String(req.query.phone || "");
+    const rawPhone = String(req.query.phone || "").trim();
     const code = req.query.code ? String(req.query.code) : "";
 
-    if (!phone) {
+    if (!rawPhone) {
       return res
         .status(400)
         .json({ success: false, error: "Parâmetro 'phone' é obrigatório" });
     }
 
-    // Garante +55... e só dígitos
-    const sanitized = phone.replace(/[^\d]/g, "");
-    const to = sanitized.startsWith("+" ) ? sanitized : `+${sanitized}`;
+    // 🔹 Normaliza telefone para formato E.164 (+55...)
+    const digits = rawPhone.replace(/[^\d]/g, "");
+
+    let to: string;
+    if (rawPhone.startsWith("+")) {
+      // Já veio no formato +55...
+      to = rawPhone;
+    } else if (digits.startsWith("55")) {
+      // Já tem DDI 55, só falta o +
+      to = `+${digits}`;
+    } else {
+      // Sem DDI -> assume Brasil
+      to = `+55${digits}`;
+    }
 
     // 1) Enviar SMS
     if (step === "start") {
